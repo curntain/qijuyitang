@@ -21,6 +21,9 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: write   # 允许流水线创建/更新 Release
+
 jobs:
   desktop:
     strategy:
