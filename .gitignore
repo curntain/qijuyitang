@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.tools/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.env
+*.log
+.qoder/
+server/data/
