@@ -12,6 +12,75 @@
     "dev:client": "npm run dev -w client",
     "test": "npm run test -w shared",
     "build": "npm run build -w client",
-    "start": "npm run start -w server"
+    "start": "npm run start -w server",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "author": "curntain",
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.1",
+    "electron": "33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.curntain.qijuyitang",
+    "productName": "棋聚一堂",
+    "directories": {
+      "app": "server",
+      "output": "release"
+    },
+    "asar": false,
+    "files": [
+      "**/*",
+      "!data"
+    ],
+    "extraResources": [
+      {
+        "from": "client/dist",
+        "to": "client/dist"
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.games",
+      "identity": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "棋聚一堂"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Game",
+      "maintainer": "curntain <19951562314@163.com>",
+      "executableName": "qijuyitang"
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  },
+  "dependencies": {
+    "app-builder-bin": "^5.0.0-alpha.10"
   }
 }

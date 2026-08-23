@@ -9,3 +9,10 @@ dist/
 *.log
 .qoder/
 server/data/
+release/
+
+# Capacitor / Android 构建产物
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties

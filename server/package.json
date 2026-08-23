@@ -1,5 +1,5 @@
 {
-  "name": "@qi/server",
+  "name": "qijuyitang",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -25,5 +25,8 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.0",
     "typescript": "^5.5.0"
-  }
+  },
+  "main": "electron-main.cjs",
+  "author": "curntain",
+  "description": "棋聚一堂 - 棋类对弈大厅服务端与桌面封装"
 }

@@ -1,0 +1,12 @@
+{
+  "appId": "com.curntain.qijuyitang",
+  "appName": "棋聚一堂",
+  "webDir": "client/dist",
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "url": "http://127.0.0.1:3001",
+    "cleartext": true
+  }
+}
