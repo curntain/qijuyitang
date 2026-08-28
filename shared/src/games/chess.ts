@@ -15,12 +15,15 @@ export const chessEngine: GameEngine<ChessState, ChessMove> = {
   id: 'chess',
   name: '国际象棋',
 
-  initialState(): ChessState {
+  initialState(options?: Record<string, unknown>): ChessState {
+    const fen = new Chess().fen();
+    const whiteFirst = options?.firstTurn === 'white';
     return {
-      turn: 'black', // chess.js 起始局面白先,框架里 black=先行方
+      // 默认 black=先行方(chess.js 白先);随机先手时 white 先行,改走子方
+      turn: whiteFirst ? 'white' : 'black',
       moveCount: 0,
       lastMove: null,
-      fen: new Chess().fen(),
+      fen: whiteFirst ? fen.replace(' w ', ' b ') : fen,
       inCheck: false,
     };
   },

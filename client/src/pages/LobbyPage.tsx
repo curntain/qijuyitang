@@ -25,7 +25,7 @@ export function LobbyPage({ username, records, onLogout, onEnterRoom }: Props) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [joinRoomId, setJoinRoomId] = useState('');
-  const [timeLimit, setTimeLimit] = useState(0); // 每方用时(分钟),0=不限时
+  const [timeLimit, setTimeLimit] = useState(0); // 每手限时(分钟),0=不限时
 
   useEffect(() => {
     const socket = getSocket();
@@ -225,11 +225,11 @@ export function LobbyPage({ username, records, onLogout, onEnterRoom }: Props) {
               )}
             </div>
             <div className="field">
-              <label>每方用时</label>
+              <label>每手限时(超时判负)</label>
               <div className="game-options">
                 {[0, 5, 10, 30].map((t) => (
                   <button key={t} className={timeLimit === t ? 'selected' : ''} onClick={() => setTimeLimit(t)}>
-                    {t === 0 ? '不限时' : `${t} 分钟`}
+                    {t === 0 ? '不限时' : `${t} 分钟/手`}
                   </button>
                 ))}
               </div>

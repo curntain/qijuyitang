@@ -74,4 +74,9 @@ describe('围棋规则', () => {
     // 黑:2 子 + 角上 (0,0) 1 空 = 3
     expect(score.black).toBe(3);
   });
+
+  it('支持 firstTurn 指定白方先行', () => {
+    expect(goEngine.initialState({ firstTurn: 'white' }).turn).toBe('white');
+    expect(goEngine.initialState({ firstTurn: 'black' }).turn).toBe('black');
+  });
 });

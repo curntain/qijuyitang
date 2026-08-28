@@ -1,6 +1,6 @@
 // 四国军棋规则引擎
-// 棋盘:17×17 交叉点,四方各占 5×5 阵地(南=black 北=white 东=red 西=blue),
-// 中央环形铁路 + 各方首排铁路贯通四方。行营内棋子不可被攻击;
+// 棋盘:17×17 交叉点,四方各占 6×5 阵地(南=black 北=white 东=red 西=blue),
+// 中央环形铁路贯通四方,各方首排即环边。行营开局不摆子;行营内棋子不可被攻击;
 // 军旗被夺或无子可动即淘汰;2-3 人各自为战,4 人时对家组队(南北 vs 东西)。
 // 迷雾由服务端按玩家过滤棋子身份,引擎只依赖归属与占位,不依赖对方棋子大小。
 
@@ -18,6 +18,7 @@ export interface JunqiState {
   turn: JunqiColor;
   moveCount: number;
   lastMove: JunqiMove | null;
+  lastMoveBy: JunqiColor | null; // 上一手由谁走出(悔棋用)
   board: (JunqiPiece | null)[][]; // [y][x]
   eliminated: JunqiColor[];
   active: JunqiColor[]; // 本局参与的方向
@@ -49,14 +50,25 @@ export const PIECE_NAMES: Record<string, string> = Object.fromEntries(
 
 const k = (x: number, y: number) => `${x},${y}`;
 
-// 四方阵地:本地坐标 (c: 列 0..4, r: 行 0..4, r=0 底线 r=4 首排) → 全局坐标
+// 四方阵地:本地坐标 (c: 列 0..4, r: 行 0..5, r=0 底线 r=5 首排) → 全局坐标
 const ZONE_MAP: Record<JunqiColor, (c: number, r: number) => Point> = {
   black: (c, r) => ({ x: 6 + c, y: 16 - r }), // 南
   white: (c, r) => ({ x: 6 + c, y: r }), // 北
   red: (c, r) => ({ x: 16 - r, y: 6 + c }), // 东
   blue: (c, r) => ({ x: r, y: 6 + c }), // 西
 };
-// 首排指向中央环的方向
+const CAMP_LOCAL = [
+  [1, 2],
+  [3, 2],
+  [2, 3],
+  [1, 4],
+  [3, 4],
+];
+const HQ_LOCAL = [
+  [1, 0],
+  [3, 0],
+];
+// 首排指向中央环的方向(首排 → 中央铁路一步接轨)
 const TOWARD_CENTER: Record<JunqiColor, Point> = {
   black: { x: 0, y: -1 },
   white: { x: 0, y: 1 },
@@ -64,25 +76,19 @@ const TOWARD_CENTER: Record<JunqiColor, Point> = {
   blue: { x: 1, y: 0 },
 };
 
-const CAMP_LOCAL = [
-  [1, 1],
-  [3, 1],
-  [2, 2],
-  [1, 3],
-  [3, 3],
-];
-const HQ_LOCAL = [
-  [1, 0],
-  [3, 0],
-];
-
 export const CAMP_SET = new Set<string>();
 export const HQ_SET = new Set<string>();
+/** 各方首排兵站行(炸弹/地雷不可摆;开局棋子不上铁路) */
+export const FRONT_SET = new Set<string>();
+/** 中央铁路交叉的 9 个十字格(行棋时可落子) */
+export const CROSS_SET = new Set<string>();
 export const RAIL_SET = new Set<string>();
 export const CELL_SET = new Set<string>();
 export const ROAD_EDGES: [Point, Point][] = [];
 export const RAIL_EDGES: [Point, Point][] = [];
-/** 各方阵地 25 个交叉点集合(布阵编辑器限定可摆放区域) */
+/** 首排兵站 → 中央铁路的接轨段(视觉上画成铁路) */
+export const LINK_EDGES: [Point, Point][] = [];
+/** 各方阵地 30 个交叉点集合(布阵编辑器限定可摆放区域) */
 export const ZONE_CELL_SET: Record<JunqiColor, Set<string>> = {
   black: new Set(),
   white: new Set(),
@@ -92,25 +98,26 @@ export const ZONE_CELL_SET: Record<JunqiColor, Set<string>> = {
 
 // ===== 静态棋盘构建(模块加载时执行一次) =====
 function buildBoard(): void {
-  // 中央环形铁路
-  for (let i = 5; i <= 11; i++) {
-    for (const p of [
-      { x: i, y: 5 },
-      { x: i, y: 11 },
-      { x: 5, y: i },
-      { x: 11, y: i },
-    ]) {
-      RAIL_SET.add(k(p.x, p.y));
-      CELL_SET.add(k(p.x, p.y));
+  // 中央"井"字铁路:3 纵(x=6/8/10)连南北、3 横(y=6/8/10)连东西
+  // 交叉 9 处十字格(四边各 3 个 + 中心 1 个,散开不相邻),四方首排皆接轨
+  for (const x of [6, 8, 10]) {
+    for (let y = 6; y <= 10; y++) {
+      RAIL_SET.add(k(x, y));
+      CELL_SET.add(k(x, y));
     }
   }
-  for (let i = 5; i < 11; i++) {
-    RAIL_EDGES.push(
-      [{ x: i, y: 5 }, { x: i + 1, y: 5 }],
-      [{ x: i, y: 11 }, { x: i + 1, y: 11 }],
-      [{ x: 5, y: i }, { x: 5, y: i + 1 }],
-      [{ x: 11, y: i }, { x: 11, y: i + 1 }],
-    );
+  for (const y of [6, 8, 10]) {
+    for (let x = 6; x <= 10; x++) {
+      RAIL_SET.add(k(x, y));
+      CELL_SET.add(k(x, y));
+    }
+  }
+  for (const x of [6, 8, 10]) for (const y of [6, 8, 10]) CROSS_SET.add(k(x, y));
+  for (const x of [6, 8, 10]) {
+    for (let y = 6; y < 10; y++) RAIL_EDGES.push([{ x, y }, { x, y: y + 1 }]);
+  }
+  for (const y of [6, 8, 10]) {
+    for (let x = 6; x < 10; x++) RAIL_EDGES.push([{ x, y }, { x: x + 1, y }]);
   }
   for (const color of JUNQI_COLORS) {
     const zone = ZONE_MAP[color];
@@ -122,33 +129,37 @@ function buildBoard(): void {
       const p = zone(c, r);
       HQ_SET.add(k(p.x, p.y));
     }
-    for (let r = 0; r <= 4; r++) {
+    for (let r = 0; r <= 5; r++) {
       for (let c = 0; c <= 4; c++) {
         const p = zone(c, r);
         CELL_SET.add(k(p.x, p.y));
         ZONE_CELL_SET[color].add(k(p.x, p.y));
         if (c < 4) ROAD_EDGES.push([p, zone(c + 1, r)]);
-        if (r < 4) ROAD_EDGES.push([p, zone(c, r + 1)]);
+        if (r < 5) ROAD_EDGES.push([p, zone(c, r + 1)]);
       }
     }
-    // 中部斜线(行营之间)与司令部斜线
-    for (const r of [1, 2]) {
-      for (const c of [1, 2]) {
+    // 中部斜线(行营之间)
+    for (const r of [1, 2, 3]) {
+      for (const c of [0, 1, 2]) {
         ROAD_EDGES.push([zone(c, r), zone(c + 1, r + 1)]);
         ROAD_EDGES.push([zone(c + 1, r), zone(c, r + 1)]);
       }
     }
+    // 司令部斜线(底线两格连向中央)
     ROAD_EDGES.push([zone(1, 0), zone(2, 1)], [zone(3, 0), zone(2, 1)]);
-    // 首排铁路 + 与中央环的连接
+    // 首排兵站 → 中央铁路(一步接轨;开局不摆子,行棋时可上铁路)
     const dir = TOWARD_CENTER[color];
-    for (let c = 0; c < 4; c++) {
-      RAIL_EDGES.push([zone(c, 4), zone(c + 1, 4)]);
-    }
     for (let c = 0; c <= 4; c++) {
-      const p = zone(c, 4);
-      const ring = { x: p.x + dir.x, y: p.y + dir.y };
-      RAIL_SET.add(k(p.x, p.y));
-      RAIL_EDGES.push([p, ring]);
+      const p = zone(c, 5);
+      FRONT_SET.add(k(p.x, p.y));
+      // 仅两边(列0/4)与中间(列2)接轨,中间两个不接
+      if (c === 2 || c === 0 || c === 4) {
+        const to = { x: p.x + dir.x, y: p.y + dir.y };
+        if (RAIL_SET.has(k(to.x, to.y))) {
+          ROAD_EDGES.push([p, to]);
+          LINK_EDGES.push([p, to]);
+        }
+      }
     }
   }
 }
@@ -210,7 +221,9 @@ function shuffle<T>(arr: T[], rng: () => number): T[] {
 function placePieces(board: (JunqiPiece | null)[][], color: JunqiColor, rng: () => number): void {
   const zone = ZONE_MAP[color];
   const locals: [number, number][] = [];
-  for (let r = 0; r <= 4; r++) for (let c = 0; c <= 4; c++) locals.push([c, r]);
+  for (let r = 0; r <= 5; r++) for (let c = 0; c <= 4; c++) locals.push([c, r]);
+  const isCamp = (c: number, r: number) => CAMP_LOCAL.some(([cc, rr]) => cc === c && rr === r);
+  const isHQ = (c: number, r: number) => HQ_LOCAL.some(([cc, rr]) => cc === c && rr === r);
   const occupied = new Set<string>();
   const at = (c: number, r: number) => k(zone(c, r).x, zone(c, r).y);
   const put = (c: number, r: number, type: string, rank: number) => {
@@ -219,28 +232,28 @@ function placePieces(board: (JunqiPiece | null)[][], color: JunqiColor, rng: () 
     occupied.add(at(c, r));
   };
   const pick = (candidates: [number, number][]): [number, number] => {
-    const free = candidates.filter(([c, r]) => !occupied.has(at(c, r)));
+    const free = candidates.filter(([c, r]) => !isCamp(c, r) && !occupied.has(at(c, r)));
     return free[Math.floor(rng() * free.length)];
   };
 
   // 军旗 → 司令部之一
   const [fc, fr] = pick(HQ_LOCAL as [number, number][]);
   put(fc, fr, 'junqi', -2);
-  // 地雷 → 后两排
-  const backTwo = locals.filter(([, r]) => r <= 1);
+  // 地雷 → 后两排(底线/次底线,不含司令部)
+  const backTwo = locals.filter(([c, r]) => r <= 1 && !isHQ(c, r));
   for (let i = 0; i < 3; i++) {
     const [c, r] = pick(backTwo);
     put(c, r, 'dilei', -1);
   }
-  // 炸弹 → 非首排
-  const notFront = locals.filter(([, r]) => r <= 3);
+  // 炸弹 → 非首排(不含司令部)
+  const notFront = locals.filter(([c, r]) => r <= 4 && !isHQ(c, r));
   for (let i = 0; i < 2; i++) {
     const [c, r] = pick(notFront);
     put(c, r, 'zhadan', 0);
   }
   // 其余棋子填满剩余位置
   const rest: [number, number][] = shuffle(
-    locals.filter(([c, r]) => !occupied.has(at(c, r))),
+    locals.filter(([c, r]) => !isCamp(c, r) && !occupied.has(at(c, r))),
     rng,
   );
   const pool: { type: string; rank: number }[] = [];
@@ -392,6 +405,7 @@ function applyMoveInternal(state: JunqiState, move: JunqiMove): JunqiState {
     turn: state.turn,
     moveCount: state.moveCount + 1,
     lastMove: move,
+    lastMoveBy: state.turn,
     board: cloneBoard(state.board),
     eliminated: state.eliminated.slice(),
     active: state.active.slice(),
@@ -494,10 +508,12 @@ export function applyLayout(
     const rank = PIECE_RANKS[pl.type];
     if (rank === undefined) return '布阵包含未知棋子';
     if (!zone.has(key)) return '棋子必须摆在己方阵地内';
+    if (CAMP_SET.has(key)) return '行营内不能摆放棋子';
     if (used.has(key)) return '同一位置摆了多枚棋子';
     if (pl.type === 'junqi' && !HQ_SET.has(key)) return '军旗必须摆在司令部';
-    if (pl.type === 'dilei' && RAIL_SET.has(key)) return '地雷不能摆在首排铁路';
-    if (pl.type === 'zhadan' && RAIL_SET.has(key)) return '炸弹不能摆在首排';
+    if ((pl.type === 'dilei' || pl.type === 'zhadan') && (RAIL_SET.has(key) || FRONT_SET.has(key))) {
+      return '炸弹/地雷不能摆在首排铁路';
+    }
     used.add(key);
   }
   for (let y = 0; y < JUNQI_N; y++) {
@@ -524,11 +540,16 @@ export const junqiEngine: GameEngine<JunqiState, JunqiMove> = {
       Array.from({ length: JUNQI_N }, () => null),
     );
     for (const color of colors) placePieces(board, color, rng);
-    const first = CYCLE.find((c) => colors.includes(c)) ?? colors[0];
+    // 开局先手:支持随机指定,否则按固定循环顺序(black→white→red→blue)取首个参与方
+    const first =
+      options?.firstTurn && colors.includes(options.firstTurn as JunqiColor)
+        ? (options.firstTurn as JunqiColor)
+        : CYCLE.find((c) => colors.includes(c)) ?? colors[0];
     return {
       turn: first,
       moveCount: 0,
       lastMove: null,
+      lastMoveBy: null,
       board,
       eliminated: [],
       active: colors,

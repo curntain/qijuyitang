@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  CAMP_SET,
   HQ_SET,
   JUNQI_N,
   RAIL_SET,
@@ -30,6 +31,7 @@ function emptyState(active: ('black' | 'white' | 'red' | 'blue')[] = ['black', '
     turn: active[0],
     moveCount: 0,
     lastMove: null,
+    lastMoveBy: null,
     board: Array.from({ length: JUNQI_N }, () => Array.from({ length: JUNQI_N }, () => null)),
     eliminated: [],
     active,
@@ -69,6 +71,16 @@ describe('四国军棋:初始布阵', () => {
       expect(count).toBe(25);
       expect(flags).toBe(1);
     }
+    // 行营开局不摆子
+    for (const key of CAMP_SET) {
+      const [x, y] = key.split(',').map(Number);
+      expect(state.board[y][x]).toBeNull();
+    }
+    // 开局铁路上无棋子
+    for (const key of RAIL_SET) {
+      const [x, y] = key.split(',').map(Number);
+      expect(state.board[y][x]).toBeNull();
+    }
   });
 
   it('四人模式与团队标记', () => {
@@ -102,87 +114,99 @@ describe('四国军棋:着法生成', () => {
 
   it('工兵在铁路上可转弯飞行', () => {
     const state = emptyState();
-    // 北方方面前排行(铁路):工兵位于 (6,4),沿首排滑到 (10,4) 再转入中央环 (10,5)
-    put(state, 6, 4, 'black', 'gongbing', 1);
+    // 中央铁路十字格中心 (8,8):沿纵轨上行到 (8,6),也能右转再上行到 (9,6)
+    put(state, 8, 8, 'black', 'gongbing', 1);
     state.turn = 'black';
     const moves = junqiEngine.getLegalMoves(state);
-    expect(moves.some((m) => m.to.x === 10 && m.to.y === 4)).toBe(true);
-    expect(moves.some((m) => m.to.x === 10 && m.to.y === 5)).toBe(true);
+    expect(moves.some((m) => m.to.x === 8 && m.to.y === 6)).toBe(true);
+    expect(moves.some((m) => m.to.x === 9 && m.to.y === 6)).toBe(true);
   });
 
   it('非工兵棋子铁路只能直线滑行,不能转弯', () => {
     const state = emptyState();
-    put(state, 6, 4, 'black', 'siling', 9);
+    put(state, 8, 8, 'black', 'siling', 9);
     state.turn = 'black';
     const moves = junqiEngine.getLegalMoves(state);
-    expect(moves.some((m) => m.to.x === 10 && m.to.y === 4)).toBe(true); // 沿首排滑到底
-    expect(moves.some((m) => m.to.x === 10 && m.to.y === 5)).toBe(false); // 不能转弯
-    expect(moves.some((m) => m.to.x === 6 && m.to.y === 5)).toBe(true); // 可转入中央环(直线)
+    expect(moves.some((m) => m.to.x === 8 && m.to.y === 6)).toBe(true); // 直线向上
+    expect(moves.some((m) => m.to.x === 6 && m.to.y === 8)).toBe(true); // 直线向左
+    expect(moves.some((m) => m.to.x === 9 && m.to.y === 6)).toBe(false); // 不能转弯
+  });
+
+  it('lastMoveBy 记录上一手行棋方(悔棋用)', () => {
+    const state = emptyState();
+    put(state, 8, 11, 'black', 'gongbing', 1);
+    put(state, 9, 16, 'black', 'junqi', -2); // 黑旗(避免黑方被淘汰)
+    put(state, 7, 0, 'white', 'junqi', -2); // 白旗(避免白方被淘汰)
+    put(state, 8, 0, 'white', 'paizhang', 2); // 白方活子
+    state.turn = 'black';
+    const next = junqiEngine.applyMove(state, { from: { x: 8, y: 11 }, to: { x: 8, y: 10 } });
+    expect(next.lastMoveBy).toBe('black');
+    expect(next.turn).toBe('white');
   });
 
   it('行营内棋子不可被攻击', () => {
     const state = emptyState();
-    // 黑方阵地行营 (7,15) 是本地 (1,1):黑方 zone(c=1,r=1) = (7,15)
-    put(state, 7, 15, 'white', 'paizhang', 2); // 敌子占据行营
-    put(state, 7, 16, 'black', 'siling', 9); // 司令在底线相邻位置
+    // 黑方中心行营 (8,13) 是本地 (c=2,r=3);相邻兵站 (8,14) 为本地 (c=2,r=2)
+    put(state, 8, 13, 'white', 'paizhang', 2); // 敌子占据行营
+    put(state, 8, 14, 'black', 'siling', 9); // 相邻兵站
     state.turn = 'black';
     const moves = junqiEngine.getLegalMoves(state);
-    expect(moves.some((m) => m.to.x === 7 && m.to.y === 15)).toBe(false);
+    expect(moves.some((m) => m.to.x === 8 && m.to.y === 13)).toBe(false);
   });
 });
 
 describe('四国军棋:战斗判定', () => {
-  // 黑方首排 (8,12) 与次排 (8,13) 公路相邻,用作战斗测试位(均在棋盘有效交叉点上)
+  // 黑方 (8,12)=本地(c=2,r=4)兵站 与 (8,11)=本地(c=2,r=5)首排兵站 公路相邻
   const battle = (attackerType: string, attackerRank: number, defenderType: string, defenderRank: number) => {
     const state = emptyState();
     put(state, 8, 12, 'black', attackerType, attackerRank);
-    put(state, 8, 13, 'white', defenderType, defenderRank);
+    put(state, 8, 11, 'white', defenderType, defenderRank);
     put(state, 6, 16, 'white', 'junqi', -2); // 白旗(防止白无旗误判)
     put(state, 9, 16, 'white', 'paizhang', 2); // 白方活子(避免无子可动被淘汰)
     put(state, 10, 0, 'black', 'junqi', -2); // 黑旗(防止黑无旗误判)
     state.turn = 'black';
-    return junqiEngine.applyMove(state, { from: { x: 8, y: 12 }, to: { x: 8, y: 13 } });
+    return junqiEngine.applyMove(state, { from: { x: 8, y: 12 }, to: { x: 8, y: 11 } });
   };
 
   it('大吃小:攻方占领目标位置', () => {
     const next = battle('siling', 9, 'lianzhang', 3);
-    expect(next.board[13][8]?.side).toBe('black');
+    expect(next.board[11][8]?.side).toBe('black');
     expect(next.board[12][8]).toBeNull();
   });
 
   it('小碰大:攻方阵亡,守方保留', () => {
     const next = battle('lianzhang', 3, 'siling', 9);
-    expect(next.board[13][8]?.side).toBe('white');
+    expect(next.board[11][8]?.side).toBe('white');
     expect(next.board[12][8]).toBeNull();
   });
 
   it('同级同归于尽', () => {
     const next = battle('tuanzhang', 5, 'tuanzhang', 5);
-    expect(next.board[13][8]).toBeNull();
+    expect(next.board[11][8]).toBeNull();
     expect(next.board[12][8]).toBeNull();
   });
 
   it('炸弹与任何棋子同归于尽', () => {
     const next = battle('zhadan', 0, 'siling', 9);
-    expect(next.board[13][8]).toBeNull();
+    expect(next.board[11][8]).toBeNull();
     expect(next.board[12][8]).toBeNull();
   });
 
   it('工兵可以排雷,其他棋子撞雷阵亡且地雷保留', () => {
     const ok = battle('gongbing', 1, 'dilei', -1);
-    expect(ok.board[13][8]?.type).toBe('gongbing');
+    expect(ok.board[11][8]?.type).toBe('gongbing');
     const fail = battle('junzhang', 8, 'dilei', -1);
-    expect(fail.board[13][8]?.type).toBe('dilei');
+    expect(fail.board[11][8]?.type).toBe('dilei');
     expect(fail.board[12][8]).toBeNull();
   });
 
   it('夺取军旗即获胜(两人模式)', () => {
     const state = emptyState();
-    put(state, 8, 12, 'black', 'siling', 9);
-    put(state, 8, 13, 'white', 'junqi', -2);
+    put(state, 7, 0, 'white', 'junqi', -2); // 白方司令部
+    put(state, 7, 1, 'black', 'siling', 9); // 相邻进攻
     put(state, 6, 16, 'black', 'junqi', -2); // 黑旗(防止黑无旗误判)
     state.turn = 'black';
-    const next = junqiEngine.applyMove(state, { from: { x: 8, y: 12 }, to: { x: 8, y: 13 } });
+    const next = junqiEngine.applyMove(state, { from: { x: 7, y: 1 }, to: { x: 7, y: 0 } });
     expect(junqiEngine.getStatus(next)).toBe('black-win');
     expect(next.eliminated).toContain('white');
   });
@@ -266,5 +290,12 @@ describe('四国军棋:淘汰与组队胜负', () => {
     const next = junqiEngine.applyMove(state, { from: { x: 8, y: 0 }, to: { x: 8, y: 1 } });
     expect(next.eliminated).toContain('black');
     expect(junqiEngine.getStatus(next)).toBe('white-win');
+  });
+
+  it('支持 firstTurn 指定先手方', () => {
+    const colors = ['black', 'white', 'red', 'blue'];
+    const s = junqiEngine.initialState({ colors, firstTurn: 'red' });
+    expect(s.turn).toBe('red');
+    expect(junqiEngine.initialState({ colors }).turn).toBe('black'); // 未指定时固定首个参与方
   });
 });

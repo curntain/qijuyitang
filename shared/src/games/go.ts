@@ -68,7 +68,7 @@ export const goEngine: GameEngine<GoState, GoMove> = {
     const rawSize = Number(options?.size ?? 9);
     const size = [9, 13, 19].includes(rawSize) ? rawSize : 9;
     return {
-      turn: 'black',
+      turn: options?.firstTurn === 'white' ? 'white' : 'black', // 默认黑先,支持随机先手
       moveCount: 0,
       lastMove: null,
       size,

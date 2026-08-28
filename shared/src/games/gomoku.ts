@@ -43,9 +43,9 @@ export const gomokuEngine: GameEngine<GomokuState, GomokuMove> = {
   id: 'gomoku',
   name: '五子棋',
 
-  initialState(): GomokuState {
+  initialState(options?: Record<string, unknown>): GomokuState {
     return {
-      turn: 'black',
+      turn: options?.firstTurn === 'white' ? 'white' : 'black', // 默认黑先,支持随机先手
       moveCount: 0,
       lastMove: null,
       size: GOMOKU_SIZE,

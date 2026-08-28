@@ -31,7 +31,7 @@ export interface Room {
   disconnectTimer: ReturnType<typeof setTimeout> | null;
   aiPending: boolean;
   pendingUndo: { color: Player; name: string } | null; // 待对方确认的悔棋请求(真人对局)
-  timeLimit: number; // 每方用时上限(毫秒),0=不限时
+  timeLimit: number; // 每手限时(毫秒),0=不限时;行棋后计时恢复满值
   timeLeft: Partial<Record<Player, number>>;
   clockTimer: ReturnType<typeof setInterval> | null;
   chatLog: { name: string; color: Player; text: string; at: number }[];
@@ -177,7 +177,10 @@ function finishGame(io: Server, room: Room, status: GameStatus, reason: string):
 function tryStartJunqi(io: Server, room: Room): void {
   if (room.game !== 'junqi' || room.started || room.finished) return;
   if (room.players.length < 2 || !room.players.every((p) => room.layouts[p.color])) return;
-  room.state = engines.junqi.initialState({ colors: room.players.map((p) => p.color) });
+  const colors = room.players.map((p) => p.color);
+  // 开局先手随机:从参与者中随机选一方先行,再按固定循环顺序轮转
+  const firstTurn = colors[Math.floor(Math.random() * colors.length)];
+  room.state = engines.junqi.initialState({ colors, firstTurn });
   for (const p of room.players) {
     applyLayout(room.state as JunqiState, p.color, room.layouts[p.color]!);
   }
@@ -196,11 +199,17 @@ function eliminateJunqiSide(io: Server, room: Room, color: Player, reason: strin
     finishGame(io, room, status, reason);
     return;
   }
+  resetMoveClocks(room); // 每手限时:淘汰一方后继续对局,新行棋方重新倒计时
   emitGameUpdate(io, room);
   broadcastLobby(io);
 }
 
-/** 每秒时钟心跳:扣减行棋方用时,超时判负(四国军棋为淘汰该方) */
+/** 每手限时:将全员计时恢复为建房时设定的每手时长,轮到谁谁从满值倒计时 */
+function resetMoveClocks(room: Room): void {
+  room.timeLeft = { black: room.timeLimit, white: room.timeLimit, red: room.timeLimit, blue: room.timeLimit };
+}
+
+/** 每秒时钟心跳:扣减当前行棋方每手剩余时间,超时判负(四国军棋为淘汰该方) */
 function clockTick(io: Server, room: Room): void {
   if (room.destroyed || room.finished || !room.started || room.timeLimit <= 0) return;
   const turn = room.state.turn as Player;
@@ -250,6 +259,7 @@ function applyMove(io: Server, room: Room, color: Player, move: any): boolean {
   room.state = engine.applyMove(room.state, move);
   room.started = true;
   room.pendingUndo = null; // 有新着法后,待确认的悔棋请求自动失效
+  resetMoveClocks(room); // 每手限时:行棋后全员恢复满值,新行棋方重新倒计时
 
   const status: GameStatus = engine.getStatus(room.state);
   if (status !== 'playing') {
@@ -282,7 +292,9 @@ export function setupRooms(io: Server): void {
       const vsAI = Boolean(data?.vsAI) && game !== 'junqi'; // 四国军棋仅支持真人对战
       const options = game === 'go' ? { size: [9, 13, 19].includes(Number(data?.size)) ? Number(data.size) : 9 } : {};
       const humanColor: Player = vsAI && data?.humanColor === 'white' ? 'white' : 'black';
-      // 每方用时(分钟):仅支持 0(不限时)/5/10/30,其余视为不限时
+      // 开局先手随机:五子棋/围棋/象棋/国象黑白随机;四国军棋在开赛时从参与者中随机
+      const firstTurn: Player = Math.random() < 0.5 ? 'black' : 'white';
+      // 每手限时(分钟):仅支持 0(不限时)/5/10/30,其余视为不限时
       const timeMinutes = [5, 10, 30].includes(Number(data?.time)) ? Number(data.time) : 0;
       const timeLimit = timeMinutes * 60_000;
 
@@ -293,7 +305,9 @@ export function setupRooms(io: Server): void {
         players: [
           { userId: user.id, name: user.username, color: humanColor, isAI: false, socketId: socket.id },
         ],
-        state: engines[game].initialState(game === 'junqi' ? { colors: [humanColor] } : options),
+        state: engines[game].initialState(
+          game === 'junqi' ? { colors: [humanColor] } : { ...options, firstTurn },
+        ),
         history: [],
         started: false,
         readyToStart: false, // 两人到齐待开始(等房主点击开始)
@@ -324,7 +338,7 @@ export function setupRooms(io: Server): void {
       broadcastLobby(io);
       ack?.({ ok: true, room: roomViewFor(io, room, humanColor) });
       socket.emit('game:update', roomViewFor(io, room, humanColor));
-      scheduleAIMove(io, room); // 人类执白时 AI 先手
+      scheduleAIMove(io, room); // 开局先手随机,若轮到 AI 则 AI 先行
     });
 
     socket.on('room:join', (data: any, ack?: (data: unknown) => void) => {
@@ -441,7 +455,6 @@ export function setupRooms(io: Server): void {
       if (!room || room.destroyed || room.finished) return ack?.({ error: '对局已结束' });
       const me = room.players.find((p) => p.userId === user?.id);
       if (!me) return ack?.({ error: '你不在该房间' });
-      if (room.game === 'junqi') return ack?.({ error: '四国军棋不支持悔棋' });
       const hasAI = room.players.some((p) => p.isAI);
 
       if (hasAI) {
@@ -451,14 +464,16 @@ export function setupRooms(io: Server): void {
         if (room.history.length < 2) return ack?.({ error: '没有可悔的着法' });
         room.state = room.history.pop();
         room.state = room.history.pop();
+        resetMoveClocks(room); // 每手限时:悔棋后重新倒计时
         emitGameUpdate(io, room);
         return ack?.({ ok: true });
       }
 
-      // 真人对局:只能悔自己刚下的上一手(当前轮到对方),需对方同意
+      // 真人对局(含四国军棋):只能由刚走完上一手的人申请悔棋,当前行棋方确认
       if (!room.started) return ack?.({ error: '对局尚未开始' });
-      if (room.state.turn === me.color) return ack?.({ error: '只能在你落子后请求悔棋' });
       if (room.history.length < 1) return ack?.({ error: '没有可悔的着法' });
+      const lastState = room.history[room.history.length - 1];
+      if (lastState.turn !== me.color) return ack?.({ error: '只能悔自己刚下的上一手' });
       if (room.pendingUndo) return ack?.({ error: '已有悔棋请求等待确认' });
       room.pendingUndo = { color: me.color, name: me.name };
       io.to(`room:${room.id}`).emit('game:undo-request', { name: me.name, color: me.color });
@@ -470,11 +485,15 @@ export function setupRooms(io: Server): void {
       const room = rooms.get(socket.data.roomId);
       if (!room || room.destroyed || room.finished || !room.pendingUndo) return ack?.({ ok: false });
       const me = room.players.find((p) => p.userId === user?.id);
-      if (!me || room.pendingUndo.color === me.color) return ack?.({ ok: false });
+      // 只有当前行棋方(下一手的人)能确认;申请人自己不能确认
+      if (!me || room.pendingUndo.color === me.color || me.color !== room.state.turn) {
+        return ack?.({ ok: false });
+      }
       const requester = room.pendingUndo;
       room.pendingUndo = null;
       if (data?.accept && room.history.length > 0) {
         room.state = room.history.pop(); // 对方同意:撤回上一手
+        resetMoveClocks(room); // 每手限时:悔棋后重新倒计时
         io.to(`room:${room.id}`).emit('game:undo-result', { accepted: true, name: requester.name });
       } else {
         io.to(`room:${room.id}`).emit('game:undo-result', { accepted: false, name: requester.name });

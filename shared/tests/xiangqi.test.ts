@@ -86,4 +86,9 @@ describe('中国象棋规则', () => {
     expect(xiangqiEngine.getLegalMoves(s).length).toBe(0);
     expect(xiangqiEngine.getStatus(s)).toBe('white-win');
   });
+
+  it('支持 firstTurn 指定白方(黑棋)先行', () => {
+    expect(xiangqiEngine.initialState({ firstTurn: 'white' }).turn).toBe('white');
+    expect(xiangqiEngine.initialState({ firstTurn: 'black' }).turn).toBe('black');
+  });
 });

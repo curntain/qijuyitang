@@ -17,11 +17,14 @@ export {
   JUNQI_N,
   CAMP_SET,
   HQ_SET,
+  FRONT_SET,
+  CROSS_SET,
   RAIL_SET,
   CELL_SET,
   ZONE_CELL_SET,
   ROAD_EDGES,
   RAIL_EDGES,
+  LINK_EDGES,
 } from './games/junqi.js';
 export type { JunqiState, JunqiPiece, JunqiColor } from './games/junqi.js';
 

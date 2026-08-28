@@ -43,4 +43,9 @@ describe('五子棋规则', () => {
     }
     expect(gomokuEngine.getStatus(s)).toBe('playing');
   });
+
+  it('支持 firstTurn 指定白方先行', () => {
+    expect(gomokuEngine.initialState({ firstTurn: 'white' }).turn).toBe('white');
+    expect(gomokuEngine.initialState({ firstTurn: 'black' }).turn).toBe('black');
+  });
 });

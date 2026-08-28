@@ -254,9 +254,9 @@ export const xiangqiEngine: GameEngine<XiangqiState, XiangqiMove> = {
   id: 'xiangqi',
   name: '中国象棋',
 
-  initialState(): XiangqiState {
+  initialState(options?: Record<string, unknown>): XiangqiState {
     return {
-      turn: 'black',
+      turn: options?.firstTurn === 'white' ? 'white' : 'black', // 默认红先,支持随机先手
       moveCount: 0,
       lastMove: null,
       board: buildInitialBoard(),

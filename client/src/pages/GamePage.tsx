@@ -50,12 +50,20 @@ export function GamePage({ room, userId, onLeave }: Props) {
     });
   };
 
-  // ===== 悔棋(四国军棋不支持) =====
+  // ===== 悔棋(真人对局:上一手本人申请,当前行棋方确认;军棋同样适用) =====
   const [undoNotice, setUndoNotice] = useState('');
   const canUndoAI = room.game !== 'junqi' && isVsAI && myTurn && state.moveCount >= 2;
-  const canUndoHuman = room.game !== 'junqi' && !isVsAI && room.started && !room.finished && !myTurn && state.moveCount >= 1;
+  // 真人对局(含四国军棋):仅“上一手本人”可申请悔棋;4 人局用 lastMoveBy 限定
+  const canUndoHuman =
+    !isVsAI &&
+    room.started &&
+    !room.finished &&
+    !myTurn &&
+    state.moveCount >= 1 &&
+    (room.game !== 'junqi' || state.lastMoveBy === myColor);
   const undoRequestByMe = room.pendingUndo != null && room.pendingUndo.color === myColor;
-  const undoRequestToMe = room.pendingUndo != null && room.pendingUndo.color !== myColor;
+  const undoRequestToMe =
+    room.pendingUndo != null && room.pendingUndo.color !== myColor && state.turn === myColor;
 
   // ===== 计时(服务端每秒广播,本地同步并为行棋方平滑递减) =====
   const [timeLeft, setTimeLeft] = useState<Partial<Record<Player, number>>>(room.timeLeft ?? {});
@@ -236,6 +244,12 @@ export function GamePage({ room, userId, onLeave }: Props) {
           {GAME_NAMES[room.game]}
           <span className="room-id">房号 {room.id}</span>
         </h2>
+        {timeLimited && (
+          <div className="time-hint">每手限时 {String(room.options.time)} 分钟,超时判负</div>
+        )}
+        {!room.started && !room.finished && (
+          <div className="time-hint">开局先手由系统随机决定</div>
+        )}
         <ul className="player-list">
           {room.players.map((p) => (
             <li key={p.color} className={state.turn === p.color && !room.finished ? 'active' : ''}>

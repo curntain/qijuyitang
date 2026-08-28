@@ -57,4 +57,10 @@ describe('国际象棋规则(chess.js 封装)', () => {
     // 后 h4 将死执白的先行方框架角色 black → white 胜
     expect(chessEngine.getStatus(s)).toBe('white-win');
   });
+
+  it('支持 firstTurn 指定白方(框架 white)先行', () => {
+    const s = chessEngine.initialState({ firstTurn: 'white' });
+    expect(s.turn).toBe('white');
+    expect(s.fen).toContain(' b '); // 走子方改为黑方
+  });
 });

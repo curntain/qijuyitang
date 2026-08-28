@@ -1,32 +1,18 @@
-// 四国军棋布阵编辑器:开局前在己方 5×5 阵地内自由摆放 25 枚棋子,
+// 四国军棋布阵编辑器:开局前在己方 6×5 阵地内摆放 25 枚棋子(行营不摆),
 // 也可一键"自动布阵"随机填满;约束(军旗在司令部/地雷炸弹不在首排)实时生效,
 // 全员确认后由服务端自动开赛。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  CAMP_SET,
-  HQ_SET,
-  JUNQI_N,
-  PIECE_DEFS,
-  PIECE_NAMES,
-  RAIL_EDGES,
-  RAIL_SET,
-  ROAD_EDGES,
-  ZONE_CELL_SET,
-} from '@qi/shared';
-import type { JunqiColor, Point } from '@qi/shared';
-
-const CELL = 36;
-const MARGIN = 28;
-const W = MARGIN * 2 + CELL * (JUNQI_N - 1);
-const H = W;
+import { CAMP_SET, FRONT_SET, HQ_SET, JUNQI_N, PIECE_DEFS, PIECE_NAMES, RAIL_SET, ZONE_CELL_SET } from '@qi/shared';
+import type { JunqiColor } from '@qi/shared';
+import { BOARD_H as H, BOARD_W as W, BOARD_BG, CELL, MARGIN, drawBoardBase } from './junqiArt';
 
 // 己方棋子预览配色(按方位)
 const SIDE_STYLE: Record<string, { fill: string; border: string; text: string }> = {
-  black: { fill: '#3b3f4a', border: '#14161c', text: '#f5f5f5' },
-  white: { fill: '#f5f0e4', border: '#b5aa90', text: '#3a3428' },
-  red: { fill: '#c0392b', border: '#7e241a', text: '#ffffff' },
-  blue: { fill: '#2e6fb7', border: '#1c4a80', text: '#ffffff' },
+  black: { fill: '#f4f6f7', border: '#3a464f', text: '#2a2f36' },
+  white: { fill: '#ffffff', border: '#8a9099', text: '#2a2f36' },
+  red: { fill: '#f4f6f7', border: '#c0392b', text: '#2a2f36' },
+  blue: { fill: '#f4f6f7', border: '#2e6fb7', text: '#2a2f36' },
 };
 
 export interface JunqiPlacement {
@@ -36,55 +22,31 @@ export interface JunqiPlacement {
 }
 
 // 铁路双线画法:两条平行钢轨 + 垂直枕木,与公路细线明显区分(标准军棋棋盘样式)
-function drawRailway(
+// (已迁移至 ./junqiArt 供对局棋盘与布阵编辑器共用)
+
+// 长方形棋子:竖向矩形,现实中军棋棋子为长方块
+const PIECE_W = CELL * 0.58;
+const PIECE_H = CELL * 0.8;
+const PIECE_R = 4; // 圆角半径
+
+/** 以 (cx,cy) 为中心画圆角矩形 */
+function roundRectPath(
   ctx: CanvasRenderingContext2D,
-  edges: [Point, Point][],
-  project: (p: Point) => { cx: number; cy: number },
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  r: number,
 ): void {
-  const GAP = 4; // 双轨间距的一半
-  ctx.strokeStyle = '#332712';
-  ctx.lineCap = 'butt';
-  // 枕木(先画,被钢轨压住)
-  ctx.lineWidth = 1.6;
-  for (const [a, b] of edges) {
-    const pa = project(a);
-    const pb = project(b);
-    const dx = pb.cx - pa.cx;
-    const dy = pb.cy - pa.cy;
-    const len = Math.hypot(dx, dy) || 1;
-    const ux = dx / len;
-    const uy = dy / len;
-    const pxn = -uy;
-    const pyn = ux;
-    for (let t = CELL * 0.22; t < len - CELL * 0.1; t += CELL * 0.3) {
-      const sx = pa.cx + ux * t;
-      const sy = pa.cy + uy * t;
-      ctx.beginPath();
-      ctx.moveTo(sx + pxn * (GAP + 2), sy + pyn * (GAP + 2));
-      ctx.lineTo(sx - pxn * (GAP + 2), sy - pyn * (GAP + 2));
-      ctx.stroke();
-    }
-  }
-  // 双轨(沿线方向各偏移半个轨距,端点内缩避免拐角凸出)
-  ctx.lineWidth = 1.5;
-  for (const sign of [1, -1]) {
-    ctx.beginPath();
-    for (const [a, b] of edges) {
-      const pa = project(a);
-      const pb = project(b);
-      const dx = pb.cx - pa.cx;
-      const dy = pb.cy - pa.cy;
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len;
-      const uy = dy / len;
-      const ox = -uy * GAP * sign;
-      const oy = ux * GAP * sign;
-      const inset = Math.min(2, len / 4);
-      ctx.moveTo(pa.cx + ux * inset + ox, pa.cy + uy * inset + oy);
-      ctx.lineTo(pb.cx - ux * inset + ox, pb.cy - uy * inset + oy);
-    }
-    ctx.stroke();
-  }
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 interface Props {
@@ -140,8 +102,9 @@ export function JunqiSetup({ myColor, onSubmit, submitting, initial }: Props) {
     if (!hand) return s;
     for (const key of zoneKeys) {
       if (placed[key]) continue;
+      if (CAMP_SET.has(key)) continue;
       if (hand === 'junqi' && !HQ_SET.has(key)) continue;
-      if ((hand === 'dilei' || hand === 'zhadan') && RAIL_SET.has(key)) continue;
+      if ((hand === 'dilei' || hand === 'zhadan') && (RAIL_SET.has(key) || FRONT_SET.has(key))) continue;
       s.add(key);
     }
     return s;
@@ -156,7 +119,7 @@ export function JunqiSetup({ myColor, onSubmit, submitting, initial }: Props) {
     }
     // 先放位置受限的棋子:军旗 → 司令部,地雷/炸弹 → 非铁路
     const freeOf = (filter: (key: string) => boolean) =>
-      [...zoneKeys].filter((key) => !next[key] && filter(key));
+      [...zoneKeys].filter((key) => !next[key] && !CAMP_SET.has(key) && filter(key));
     const take = (keys: string[]): string | undefined => keys.splice(Math.floor(Math.random() * keys.length), 1)[0];
     const placeAt = (type: string, key: string | undefined) => {
       if (key) next[key] = type;
@@ -169,11 +132,11 @@ export function JunqiSetup({ myColor, onSubmit, submitting, initial }: Props) {
       const candidates =
         type === 'junqi'
           ? freeOf((key) => HQ_SET.has(key))
-          : freeOf((key) => !RAIL_SET.has(key));
+          : freeOf((key) => !RAIL_SET.has(key) && !FRONT_SET.has(key));
       placeAt(type, take(candidates));
     }
     // 其余棋子随机填入剩余位置
-    const rest = [...zoneKeys].filter((key) => !next[key]);
+    const rest = [...zoneKeys].filter((key) => !next[key] && !CAMP_SET.has(key));
     for (const type of pool) {
       const idx = Math.floor(Math.random() * rest.length);
       next[rest[idx]] = type;
@@ -205,54 +168,23 @@ export function JunqiSetup({ myColor, onSubmit, submitting, initial }: Props) {
     canvas.height = H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    ctx.fillStyle = '#e3cf9f';
+    ctx.fillStyle = BOARD_BG;
     ctx.fillRect(0, 0, W, H);
 
-    // 己方阵地高亮
-    ctx.fillStyle = 'rgba(63, 124, 255, 0.10)';
+    // 己方阵地高亮(灰底上用淡蓝提示当前玩家区域)
+    ctx.fillStyle = 'rgba(66, 118, 186, 0.16)';
     for (const key of zoneKeys) {
       const [x, y] = key.split(',').map(Number);
       const { cx, cy } = px(x, y);
       ctx.fillRect(cx - CELL / 2, cy - CELL / 2, CELL, CELL);
     }
 
-    // 公路与铁路
-    ctx.strokeStyle = '#5a4526';
-    ctx.lineWidth = 1;
-    for (const [a, b] of ROAD_EDGES) {
-      const pa = px(a.x, a.y);
-      const pb = px(b.x, b.y);
-      ctx.beginPath();
-      ctx.moveTo(pa.cx, pa.cy);
-      ctx.lineTo(pb.cx, pb.cy);
-      ctx.stroke();
-    }
-    // 铁路(双轨 + 枕木)
-    drawRailway(ctx, RAIL_EDGES, (p) => px(p.x, p.y));
-    // 行营与司令部
-    ctx.strokeStyle = '#5a4526';
-    ctx.lineWidth = 1.2;
-    for (const key of CAMP_SET) {
-      const [x, y] = key.split(',').map(Number);
-      const { cx, cy } = px(x, y);
-      ctx.beginPath();
-      ctx.arc(cx, cy, CELL * 0.42, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.setLineDash([4, 3]);
-    ctx.strokeStyle = '#8c2f24';
-    ctx.lineWidth = 1.4;
-    for (const key of HQ_SET) {
-      const [x, y] = key.split(',').map(Number);
-      const { cx, cy } = px(x, y);
-      const s = CELL * 0.42;
-      ctx.strokeRect(cx - s, cy - s, s * 2, s * 2);
-    }
-    ctx.setLineDash([]);
+    // 公路与铁路、行营大本营等底图(实体军棋盘风格)
+    drawBoardBase(ctx, (p) => px(p.x, p.y));
 
     // 手中棋子的可摆放位置提示
     if (hand) {
-      ctx.fillStyle = 'rgba(46, 160, 67, 0.5)';
+      ctx.fillStyle = 'rgba(96, 224, 122, 0.8)';
       for (const key of validCells) {
         const [x, y] = key.split(',').map(Number);
         const { cx, cy } = px(x, y);
@@ -262,31 +194,24 @@ export function JunqiSetup({ myColor, onSubmit, submitting, initial }: Props) {
       }
     }
 
-    // 已摆放的棋子
+    // 已摆放的棋子(方形,与现实军棋棋子一致)
     const style = SIDE_STYLE[myColor];
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const [key, type] of Object.entries(placed)) {
       const [x, y] = key.split(',').map(Number);
       const { cx, cy } = px(x, y);
-      ctx.beginPath();
-      ctx.arc(cx, cy, CELL * 0.42, 0, Math.PI * 2);
+      roundRectPath(ctx, cx, cy, PIECE_W, PIECE_H, PIECE_R);
       ctx.fillStyle = style.fill;
       ctx.fill();
       ctx.lineWidth = 1.6;
       ctx.strokeStyle = style.border;
       ctx.stroke();
       ctx.fillStyle = style.text;
-      ctx.font = `bold ${CELL * 0.34}px serif`;
+      ctx.font = `bold ${CELL * 0.26}px serif`;
       ctx.fillText(PIECE_NAMES[type] ?? '?', cx, cy + 1);
     }
 
-    // 图例(与对局棋盘一致)
-    ctx.fillStyle = '#6b5a3a';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('铁路=双轨线 · 公路=细线 · 圆圈=行营 · 虚线框=司令部', W / 2, MARGIN * 0.45);
   }, [placed, hand, validCells, myColor]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -351,7 +276,10 @@ export function JunqiSetup({ myColor, onSubmit, submitting, initial }: Props) {
           {submitting ? '提交中…' : complete ? '确认布阵' : `还需摆放 ${totalLeft} 枚`}
         </button>
       </div>
-      <p className="hint">规则:军旗必须在司令部,地雷/炸弹不能摆在首排铁路;全员确认后自动开赛。</p>
+      <p className="hint">
+        规则:军旗必须在司令部,地雷/炸弹不能摆在首排铁路;全员确认后自动开赛。
+        (图例:黑线=公路 · 双轨=铁路 · 白块=兵站 · 圆圈=行营 · 黑底白字=大本营 · 蓝色高亮=你的阵地)
+      </p>
     </div>
   );
 }
