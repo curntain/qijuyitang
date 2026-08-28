@@ -42,10 +42,10 @@
 
 | 平台 | 文件 | 安装方法 |
 | --- | --- | --- |
-| macOS(Apple 芯片) | `棋聚一堂-x.x.x-arm64.dmg` | 双击 dmg,把应用拖进 Applications |
-| macOS(Intel) | `棋聚一堂-x.x.x.dmg` | 同上 |
-| Windows | `棋聚一堂 Setup x.x.x.exe` | 双击安装,桌面出现快捷方式 |
-| Linux | `棋聚一堂-x.x.x-x86_64.AppImage` | `chmod +x` 后双击运行 |
+| macOS(Apple 芯片) | `qijuyitang-x.x.x-arm64.dmg` | 双击 dmg,把应用拖进 Applications |
+| macOS(Intel) | `qijuyitang-x.x.x-x64.dmg` | 同上 |
+| Windows | `qijuyitang Setup x.x.x.exe` | 双击安装,桌面出现快捷方式 |
+| Linux | `qijuyitang-x.x.x-x86_64.AppImage` | `chmod +x` 后双击运行 |
 | Android | `app-debug.apk` | 传到手机安装(见下方说明) |
 
 桌面版双击即用:**程序自带服务器**,打开应用就等于开好了房间,同一局域网的朋友用手机或电脑浏览器访问 `http://你的局域网IP:3001` 就能加入(怎么查 IP 见下文局域网一节)。首次打开如提示「无法验证开发者」,在系统设置 → 隐私与安全性里点「仍要打开」。
